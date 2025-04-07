@@ -1,9 +1,11 @@
 [build]
-  command = "npm run build"
+  command = "node netlify.js"
   publish = "build"
 
 [build.environment]
   NODE_VERSION = "16"
+  NPM_FLAGS = "--legacy-peer-deps"
+  CI = "false"
 
 # Handle SPA routing for React Router
 [[redirects]]
