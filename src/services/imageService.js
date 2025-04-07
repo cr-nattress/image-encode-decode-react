@@ -43,13 +43,74 @@ const createCanvas = (width, height) => {
   return canvas;
 };
 
+// Create a Web Worker for image processing
+let imageWorker = null;
+
+// Initialize the worker
+const initWorker = () => {
+  if (!imageWorker && window.Worker) {
+    try {
+      imageWorker = new Worker(new URL('../workers/imageWorker.js', import.meta.url));
+    } catch (error) {
+      console.error('Failed to create Web Worker:', error);
+    }
+  }
+  return imageWorker;
+};
+
 /**
- * Embeds data into an image using LSB steganography
+ * Embeds data into an image using LSB steganography via Web Worker
  * @param {HTMLImageElement} coverImage - The cover image
  * @param {Uint8Array} data - The data to embed
  * @returns {Promise<string>} - A promise that resolves to a data URL
  */
 const lsbEncode = (coverImage, data) => {
+  return new Promise((resolve, reject) => {
+    try {
+      // Try to use the Web Worker first
+      const worker = initWorker();
+      
+      if (worker) {
+        // Set up message handler
+        const messageHandler = (event) => {
+          const { type, result, error } = event.data;
+          
+          if (type === 'encode-result') {
+            worker.removeEventListener('message', messageHandler);
+            resolve(result);
+          } else if (type === 'error') {
+            worker.removeEventListener('message', messageHandler);
+            reject(new Error(error));
+          }
+        };
+        
+        worker.addEventListener('message', messageHandler);
+        
+        // Send data to worker
+        worker.postMessage({
+          type: 'encode',
+          imageData: coverImage.src,
+          data: data
+        });
+      } else {
+        // Fallback to main thread processing if worker is not available
+        fallbackLsbEncode(coverImage, data).then(resolve).catch(reject);
+      }
+    } catch (error) {
+      // Fallback to main thread processing if worker throws an error
+      console.warn('Web Worker error, falling back to main thread:', error);
+      fallbackLsbEncode(coverImage, data).then(resolve).catch(reject);
+    }
+  });
+};
+
+/**
+ * Fallback function for LSB encoding on the main thread
+ * @param {HTMLImageElement} coverImage - The cover image
+ * @param {Uint8Array} data - The data to embed
+ * @returns {Promise<string>} - A promise that resolves to a data URL
+ */
+const fallbackLsbEncode = (coverImage, data) => {
   // Create a canvas and draw the cover image on it
   const canvas = createCanvas(coverImage.width, coverImage.height);
   const ctx = drawImageOnCanvas(coverImage, canvas);
@@ -126,57 +187,107 @@ const lsbEncode = (coverImage, data) => {
 };
 
 /**
- * Extracts data from an image using LSB steganography
+ * Extracts data from an image using LSB steganography via Web Worker
  * @param {HTMLImageElement} stegoImage - The steganographic image
- * @returns {Uint8Array} - The extracted data
+ * @returns {Promise<Uint8Array>} - A promise that resolves to the extracted data
  */
 const lsbDecode = (stegoImage) => {
-  // Create a canvas and draw the stego image on it
-  const canvas = createCanvas(stegoImage.width, stegoImage.height);
-  const ctx = drawImageOnCanvas(stegoImage, canvas);
-  
-  // Get the image data
-  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  const data = imageData.data;
-  
-  // Extract the LSB from each RGB channel to get the hidden bits
-  const extractedBits = [];
-  for (let i = 0; i < data.length; i += 4) {
-    // Extract LSB from Red channel
-    extractedBits.push(data[i] & 1);
-    // Extract LSB from Green channel
-    extractedBits.push(data[i + 1] & 1);
-    // Extract LSB from Blue channel
-    extractedBits.push(data[i + 2] & 1);
-    // Ignore Alpha channel
-  }
-  
-  // First, extract the message length (first 32 bits = 4 bytes)
-  let messageLength = 0;
-  for (let i = 0; i < 32; i++) {
-    messageLength = (messageLength << 1) | extractedBits[i];
-  }
-  
-  // Check if the message length is valid
-  const maxPossibleLength = Math.floor((stegoImage.width * stegoImage.height * 3) / 8) - 4;
-  if (messageLength <= 0 || messageLength > maxPossibleLength) {
-    throw new Error('No valid hidden message found in this image');
-  }
-  
-  // Convert bits to bytes (starting after the length bits)
-  const extractedBytes = new Uint8Array(messageLength);
-  for (let i = 0; i < messageLength; i++) {
-    let byte = 0;
-    for (let bit = 0; bit < 8; bit++) {
-      const bitIndex = 32 + (i * 8) + bit; // 32 bits for length + current bit position
-      if (bitIndex < extractedBits.length) {
-        byte = (byte << 1) | extractedBits[bitIndex];
+  return new Promise((resolve, reject) => {
+    try {
+      // Try to use the Web Worker first
+      const worker = initWorker();
+      
+      if (worker) {
+        // Set up message handler
+        const messageHandler = (event) => {
+          const { type, result, error } = event.data;
+          
+          if (type === 'decode-result') {
+            worker.removeEventListener('message', messageHandler);
+            resolve(result);
+          } else if (type === 'error') {
+            worker.removeEventListener('message', messageHandler);
+            reject(new Error(error));
+          }
+        };
+        
+        worker.addEventListener('message', messageHandler);
+        
+        // Send data to worker
+        worker.postMessage({
+          type: 'decode',
+          imageData: stegoImage.src
+        });
+      } else {
+        // Fallback to main thread processing if worker is not available
+        fallbackLsbDecode(stegoImage).then(resolve).catch(reject);
       }
+    } catch (error) {
+      // Fallback to main thread processing if worker throws an error
+      console.warn('Web Worker error, falling back to main thread:', error);
+      fallbackLsbDecode(stegoImage).then(resolve).catch(reject);
     }
-    extractedBytes[i] = byte;
-  }
-  
-  return extractedBytes;
+  });
+};
+
+/**
+ * Fallback function for LSB decoding on the main thread
+ * @param {HTMLImageElement} stegoImage - The steganographic image
+ * @returns {Promise<Uint8Array>} - A promise that resolves to the extracted data
+ */
+const fallbackLsbDecode = (stegoImage) => {
+  return new Promise((resolve, reject) => {
+    try {
+      // Create a canvas and draw the stego image on it
+      const canvas = createCanvas(stegoImage.width, stegoImage.height);
+      const ctx = drawImageOnCanvas(stegoImage, canvas);
+      
+      // Get the image data
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const data = imageData.data;
+      
+      // Extract the LSB from each RGB channel to get the hidden bits
+      const extractedBits = [];
+      for (let i = 0; i < data.length; i += 4) {
+        // Extract LSB from Red channel
+        extractedBits.push(data[i] & 1);
+        // Extract LSB from Green channel
+        extractedBits.push(data[i + 1] & 1);
+        // Extract LSB from Blue channel
+        extractedBits.push(data[i + 2] & 1);
+        // Ignore Alpha channel
+      }
+      
+      // First, extract the message length (first 32 bits = 4 bytes)
+      let messageLength = 0;
+      for (let i = 0; i < 32; i++) {
+        messageLength = (messageLength << 1) | extractedBits[i];
+      }
+      
+      // Check if the message length is valid
+      const maxPossibleLength = Math.floor((stegoImage.width * stegoImage.height * 3) / 8) - 4;
+      if (messageLength <= 0 || messageLength > maxPossibleLength) {
+        throw new Error('No valid hidden message found in this image');
+      }
+      
+      // Convert bits to bytes (starting after the length bits)
+      const extractedBytes = new Uint8Array(messageLength);
+      for (let i = 0; i < messageLength; i++) {
+        let byte = 0;
+        for (let bit = 0; bit < 8; bit++) {
+          const bitIndex = 32 + (i * 8) + bit; // 32 bits for length + current bit position
+          if (bitIndex < extractedBits.length) {
+            byte = (byte << 1) | extractedBits[bitIndex];
+          }
+        }
+        extractedBytes[i] = byte;
+      }
+      
+      resolve(extractedBytes);
+    } catch (error) {
+      reject(error);
+    }
+  });
 };
 
 const imageService = {

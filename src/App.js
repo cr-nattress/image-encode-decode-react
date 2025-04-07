@@ -83,6 +83,19 @@ function App() {
         throw new Error('Please upload a cover image');
       }
       
+      // Check image size to prevent processing errors
+      const img = new Image();
+      img.src = coverImageUpload.fileDataURL;
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = () => reject(new Error('Failed to load image'));
+      });
+      
+      // Limit image size to prevent memory issues
+      if (img.width * img.height > 4000000) { // ~4 megapixels
+        throw new Error('Image is too large. Please use an image smaller than 4 megapixels.');
+      }
+      
       // Convert text to bytes
       const encoder = new TextEncoder();
       let dataToEncode;
@@ -95,15 +108,20 @@ function App() {
         dataToEncode = encoder.encode(inputText);
       }
       
+      // Calculate maximum message size
+      const maxMessageSize = Math.floor((img.width * img.height * 3) / 8) - 4;
+      if (dataToEncode.length > maxMessageSize) {
+        throw new Error(`Message too large! Maximum size is ${maxMessageSize} bytes, but your message is ${dataToEncode.length} bytes.`);
+      }
+      
       // LSB encoding requires a cover image
-      const coverImage = await imageService.dataURLToImage(coverImageUpload.fileDataURL);
-      const encodedImageUrl = await imageService.lsbEncode(coverImage, dataToEncode);
+      const encodedImageUrl = await imageService.lsbEncode(img, dataToEncode);
       
       setResultImageUrl(encodedImageUrl);
       setSuccess('Message encoded successfully!');
     } catch (err) {
       console.error('Encoding error:', err);
-      setError(err.message);
+      setError(`${err.message}. If you're seeing "The message port closed" error, try using a smaller image or shorter message.`);
     } finally {
       setIsProcessing(false);
     }
@@ -122,10 +140,21 @@ function App() {
         throw new Error('Please upload an image to decode');
       }
       
-      const stegoImage = await imageService.dataURLToImage(stegoImageUpload.fileDataURL);
+      // Check image size to prevent processing errors
+      const img = new Image();
+      img.src = stegoImageUpload.fileDataURL;
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = () => reject(new Error('Failed to load image'));
+      });
+      
+      // Limit image size to prevent memory issues
+      if (img.width * img.height > 4000000) { // ~4 megapixels
+        throw new Error('Image is too large. Please use an image smaller than 4 megapixels.');
+      }
       
       // Use LSB decoding
-      const decodedData = imageService.lsbDecode(stegoImage);
+      const decodedData = await imageService.lsbDecode(img);
       
       // Check if data is encrypted
       let decodedText;
@@ -152,7 +181,7 @@ function App() {
       setSuccess('Message decoded successfully!');
     } catch (err) {
       console.error('Decoding error:', err);
-      setError(err.message);
+      setError(`${err.message}. If you're seeing "The message port closed" error, try using a smaller image.`);
     } finally {
       setIsProcessing(false);
     }
