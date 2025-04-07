@@ -1,0 +1,57 @@
+// Responsive breakpoints mixin
+@mixin respond-to($breakpoint) {
+  @if $breakpoint == "mobile" {
+    @media (max-width: $breakpoint-mobile) { @content; }
+  }
+  @if $breakpoint == "tablet" {
+    @media (max-width: $breakpoint-tablet) { @content; }
+  }
+  @if $breakpoint == "desktop" {
+    @media (max-width: $breakpoint-desktop) { @content; }
+  }
+  @if $breakpoint == "large" {
+    @media (max-width: $breakpoint-large) { @content; }
+  }
+}
+
+// Flexbox center mixin
+@mixin flex-center {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+// Flexbox column mixin
+@mixin flex-column {
+  display: flex;
+  flex-direction: column;
+}
+
+// Button style mixin
+@mixin button-style {
+  background-color: $color-primary;
+  border: none;
+  padding: $spacing-sm $spacing-lg;
+  border-radius: $border-radius;
+  font-weight: bold;
+  cursor: pointer;
+  transition: background-color 0.3s;
+  
+  &:hover:not(:disabled) {
+    background-color: $color-primary-dark;
+  }
+  
+  &:disabled {
+    background-color: $color-disabled;
+    cursor: not-allowed;
+  }
+}
+
+// Card style mixin
+@mixin card-style {
+  background-color: $color-light-gray;
+  padding: $spacing-lg;
+  border-radius: $border-radius-lg;
+  @include flex-column;
+  gap: $spacing-md;
+}

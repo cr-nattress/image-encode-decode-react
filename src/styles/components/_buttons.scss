@@ -1,0 +1,26 @@
+/* Button components */
+
+.button {
+  @include button-style;
+  
+  &--active {
+    background-color: $color-white;
+    color: $color-background;
+  }
+}
+
+.mode-selector {
+  &__button {
+    @include button-style;
+    
+    &--active {
+      background-color: $color-white;
+      color: $color-background;
+    }
+  }
+}
+
+.download-button {
+  @include button-style;
+  margin-top: $spacing-sm;
+}

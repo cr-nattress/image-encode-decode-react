@@ -1,0 +1,22 @@
+/* Image preview component */
+
+.image-preview {
+  max-width: 100%;
+  overflow: hidden;
+  border: 1px solid $color-border;
+  border-radius: $border-radius;
+  padding: $spacing-xs;
+  
+  &__img {
+    max-width: 100%;
+    max-height: 200px;
+    display: block;
+    margin: 0 auto;
+  }
+}
+
+.result-container {
+  @include flex-column;
+  gap: $spacing-sm;
+  align-items: center;
+}

@@ -1,0 +1,18 @@
+/* Main SCSS file - imports all partials */
+
+// Abstracts
+@import './abstracts/variables';
+@import './abstracts/mixins';
+
+// Base
+@import './base/reset';
+@import './base/typography';
+
+// Layout
+@import './layout/header';
+@import './layout/containers';
+
+// Components
+@import './components/buttons';
+@import './components/forms';
+@import './components/image-preview';

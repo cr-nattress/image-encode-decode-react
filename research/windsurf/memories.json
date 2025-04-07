@@ -1,0 +1,43 @@
+[
+    {
+      "key": "css-architecture",
+      "value": "Use BEM or SMACSS structure. Centralize SCSS variables. Avoid nesting deeper than 3 levels."
+    },
+    {
+      "key": "testing-framework",
+      "value": "Use Cypress for E2E testing. Tests live in `cypress/e2e`. Prefer `[data-cy=...]` selectors."
+    },
+    {
+      "key": "security-practices",
+      "value": "Sanitize inputs with DOMPurify. Use CSRF tokens. Enforce Content-Security-Policy headers."
+    },
+    {
+      "key": "accessibility-guidelines",
+      "value": "Follow WCAG 2.1 AA. Ensure keyboard support and semantic HTML for all interactive elements."
+    },
+    {
+      "key": "performance-baseline",
+      "value": "Optimize images, lazy-load components, and prefer Flex/Grid for layout."
+    },
+    {
+      "key": "component-structure",
+      "value": "Components should be atomic and documented. Use design tokens from a centralized system."
+    },
+    {
+      "key": "tooling-linters",
+      "value": "Use `eslint`, `stylelint`, and `prettier`. Run them pre-commit. Include them in CI."
+    },
+    {
+      "key": "responsive-design",
+      "value": "Mobile-first. Use fluid layouts, responsive images, and SCSS mixins for breakpoints."
+    },
+    {
+      "key": "session-security",
+      "value": "Expire inactive sessions, use `HttpOnly` and `SameSite=Strict` cookies. Never store JWTs in localStorage."
+    },
+    {
+      "key": "page-object-model",
+      "value": "Optional for large projects. Encapsulates interactions for pages using reusable classes."
+    }
+  ]
+  
