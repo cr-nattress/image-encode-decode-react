@@ -1,0 +1,1 @@
+This is a sample text file that will be used for testing the image encoding and decoding functionality.
