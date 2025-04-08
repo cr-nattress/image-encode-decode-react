@@ -8,6 +8,7 @@
   CI = "false"
   # Betterstack configuration
   BETTERSTACK_SOURCE_ID = "image_encode_decode"
+  BETTERSTACK_SOURCE_TOKEN = "4LkyLpefUiqkjeda8B7E2mKx"
   BETTERSTACK_HOST = "s1266395.eu-nbg-2.betterstackdata.com"
 
 # Handle SPA routing for React Router
