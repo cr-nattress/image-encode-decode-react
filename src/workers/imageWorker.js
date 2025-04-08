@@ -5,6 +5,20 @@
 
 /* eslint-disable no-restricted-globals */
 
+// Function to send logs back to the main thread
+const sendLog = (level, message, metadata = {}) => {
+  self.postMessage({
+    type: 'log',
+    level,
+    message,
+    metadata: {
+      ...metadata,
+      timestamp: new Date().toISOString(),
+      worker: 'imageWorker'
+    }
+  });
+};
+
 // Image processing functions
 const dataURLToImage = (dataURL) => {
   return new Promise((resolve, reject) => {
@@ -31,8 +45,11 @@ const drawImageOnCanvas = (image, canvas) => {
 // LSB encoding function
 const lsbEncode = async (imageData, data) => {
   try {
+    sendLog('info', 'Starting LSB encoding in worker', { dataSize: data.length });
+    
     // Create an image from the data URL
     const coverImage = await dataURLToImage(imageData);
+    sendLog('info', 'Image loaded in worker', { width: coverImage.width, height: coverImage.height });
     
     // Create a canvas and draw the cover image on it
     const canvas = createCanvas(coverImage.width, coverImage.height);
@@ -47,8 +64,12 @@ const lsbEncode = async (imageData, data) => {
     
     // Check if the data will fit in the image
     if (data.length > maxBytes) {
-      throw new Error(`Message too large! Maximum size is ${maxBytes} bytes, but your message is ${data.length} bytes.`);
+      const errorMsg = `Message too large! Maximum size is ${maxBytes} bytes, but your message is ${data.length} bytes.`;
+      sendLog('error', errorMsg, { maxBytes, dataLength: data.length });
+      throw new Error(errorMsg);
     }
+    
+    sendLog('info', 'Preparing data for encoding', { maxBytes, dataLength: data.length });
     
     // Create a new array that includes the message length (32-bit integer) followed by the message
     const messageLength = data.length;
@@ -71,6 +92,8 @@ const lsbEncode = async (imageData, data) => {
         messageBits.push((fullMessage[i] >> bit) & 1);
       }
     }
+    
+    sendLog('info', 'Embedding data into image', { bitsCount: messageBits.length });
     
     // Embed the message bits into the LSBs of the cover image
     let bitIndex = 0;
@@ -99,6 +122,8 @@ const lsbEncode = async (imageData, data) => {
       // Alpha channel remains unchanged
     }
     
+    sendLog('info', 'Creating result image');
+    
     // Create a new ImageData object with the modified pixel data
     const resultImageData = new ImageData(resultData, canvas.width, canvas.height);
     
@@ -110,11 +135,19 @@ const lsbEncode = async (imageData, data) => {
     const reader = new FileReader();
     
     return new Promise((resolve, reject) => {
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = () => reject(new Error('Failed to convert blob to data URL'));
+      reader.onload = () => {
+        sendLog('info', 'LSB encoding completed successfully');
+        resolve(reader.result);
+      };
+      reader.onerror = () => {
+        const errorMsg = 'Failed to convert blob to data URL';
+        sendLog('error', errorMsg);
+        reject(new Error(errorMsg));
+      };
       reader.readAsDataURL(blob);
     });
   } catch (error) {
+    sendLog('error', `Encoding error: ${error.message}`, { stack: error.stack });
     throw new Error(`Encoding error: ${error.message}`);
   }
 };
@@ -122,8 +155,11 @@ const lsbEncode = async (imageData, data) => {
 // LSB decoding function
 const lsbDecode = async (imageData) => {
   try {
+    sendLog('info', 'Starting LSB decoding in worker');
+    
     // Create an image from the data URL
     const stegoImage = await dataURLToImage(imageData);
+    sendLog('info', 'Image loaded in worker', { width: stegoImage.width, height: stegoImage.height });
     
     // Create a canvas and draw the stego image on it
     const canvas = createCanvas(stegoImage.width, stegoImage.height);
@@ -132,6 +168,8 @@ const lsbDecode = async (imageData) => {
     // Get the image data
     const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
     const data = imgData.data;
+    
+    sendLog('info', 'Extracting hidden bits from image');
     
     // Extract the LSB from each RGB channel to get the hidden bits
     const extractedBits = [];
@@ -145,6 +183,8 @@ const lsbDecode = async (imageData) => {
       // Ignore Alpha channel
     }
     
+    sendLog('info', 'Extracting message length', { bitsExtracted: extractedBits.length });
+    
     // First, extract the message length (first 32 bits = 4 bytes)
     let messageLength = 0;
     for (let i = 0; i < 32; i++) {
@@ -154,8 +194,12 @@ const lsbDecode = async (imageData) => {
     // Check if the message length is valid
     const maxPossibleLength = Math.floor((stegoImage.width * stegoImage.height * 3) / 8) - 4;
     if (messageLength <= 0 || messageLength > maxPossibleLength) {
-      throw new Error('No valid hidden message found in this image');
+      const errorMsg = 'No valid hidden message found in this image';
+      sendLog('error', errorMsg, { detectedLength: messageLength, maxPossibleLength });
+      throw new Error(errorMsg);
     }
+    
+    sendLog('info', 'Extracting message content', { messageLength });
     
     // Convert bits to bytes (starting after the length bits)
     const extractedBytes = new Uint8Array(messageLength);
@@ -170,8 +214,10 @@ const lsbDecode = async (imageData) => {
       extractedBytes[i] = byte;
     }
     
+    sendLog('info', 'LSB decoding completed successfully', { bytesExtracted: extractedBytes.length });
     return extractedBytes;
   } catch (error) {
+    sendLog('error', `Decoding error: ${error.message}`, { stack: error.stack });
     throw new Error(`Decoding error: ${error.message}`);
   }
 };
@@ -182,13 +228,16 @@ self.addEventListener('message', async (event) => {
     const { type, imageData, data } = event.data;
     
     if (type === 'encode') {
+      sendLog('info', 'Received encode request');
       const result = await lsbEncode(imageData, data);
       self.postMessage({ type: 'encode-result', result });
     } else if (type === 'decode') {
+      sendLog('info', 'Received decode request');
       const result = await lsbDecode(imageData);
       self.postMessage({ type: 'decode-result', result });
     }
   } catch (error) {
+    sendLog('error', 'Worker operation failed', { error: error.message, stack: error.stack });
     self.postMessage({ type: 'error', error: error.message });
   }
 });

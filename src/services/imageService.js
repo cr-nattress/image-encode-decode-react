@@ -2,6 +2,8 @@
  * Image utility service for handling image operations
  */
 
+import loggingService from './loggingService';
+
 /**
  * Converts a data URL to an Image object
  * @param {string} dataURL - The data URL to convert
@@ -43,20 +45,35 @@ const createCanvas = (width, height) => {
   return canvas;
 };
 
-// Create a Web Worker for image processing
+// Check if Web Workers are supported
+const isWorkerSupported = typeof Worker !== 'undefined';
+
+// Create a worker instance if supported
 let imageWorker = null;
 
-// Initialize the worker
-const initWorker = () => {
-  if (!imageWorker && window.Worker) {
-    try {
-      imageWorker = new Worker(new URL('../workers/imageWorker.js', import.meta.url));
-    } catch (error) {
-      console.error('Failed to create Web Worker:', error);
-    }
+if (isWorkerSupported) {
+  try {
+    imageWorker = new Worker(new URL('../workers/imageWorker.js', import.meta.url));
+    loggingService.info('Image worker initialized successfully');
+    
+    // Set up worker message handler
+    imageWorker.onmessage = (event) => {
+      // Handle logs from the worker
+      if (event.data.type === 'log') {
+        const { level, message, metadata } = event.data;
+        loggingService[level](message, { ...metadata, source: 'worker' });
+      }
+      // Other message types are handled by the specific promise resolvers
+    };
+    
+    imageWorker.onerror = (error) => {
+      loggingService.error('Image worker error', { error: error.message });
+    };
+  } catch (error) {
+    loggingService.error('Failed to initialize image worker', { error: error.message });
+    imageWorker = null;
   }
-  return imageWorker;
-};
+}
 
 /**
  * Embeds data into an image using LSB steganography via Web Worker
@@ -64,126 +81,141 @@ const initWorker = () => {
  * @param {Uint8Array} data - The data to embed
  * @returns {Promise<string>} - A promise that resolves to a data URL
  */
-const lsbEncode = (coverImage, data) => {
-  return new Promise((resolve, reject) => {
-    try {
-      // Try to use the Web Worker first
-      const worker = initWorker();
+const lsbEncode = async (coverImage, data) => {
+  loggingService.info('Starting LSB encoding', { dataSize: data.length });
+  
+  // If image is passed directly, use it, otherwise convert from data URL
+  let img = coverImage;
+  let imageDataURL;
+  
+  if (typeof coverImage === 'string') {
+    img = await dataURLToImage(coverImage);
+    imageDataURL = coverImage;
+  } else {
+    // Create a data URL from the image if it's an HTMLImageElement
+    const tempCanvas = createCanvas(img.width, img.height);
+    // We need to draw the image but don't need to use the context return value
+    // eslint-disable-next-line no-unused-vars
+    const tempCtx = drawImageOnCanvas(img, tempCanvas);
+    imageDataURL = tempCanvas.toDataURL('image/png');
+  }
+  
+  loggingService.info('Cover image prepared', { width: img.width, height: img.height });
+  
+  // Use Web Worker if available
+  if (imageWorker) {
+    loggingService.info('Using Web Worker for encoding');
+    return new Promise((resolve, reject) => {
+      const messageHandler = (event) => {
+        const { type, result, error } = event.data;
+        
+        if (type === 'encode-result') {
+          imageWorker.removeEventListener('message', messageHandler);
+          loggingService.info('Encoding completed in worker');
+          resolve(result);
+        } else if (type === 'error') {
+          imageWorker.removeEventListener('message', messageHandler);
+          loggingService.error('Worker encoding error', { error });
+          reject(new Error(error));
+        }
+        // Ignore log messages as they're handled by the main handler
+      };
       
-      if (worker) {
-        // Set up message handler
-        const messageHandler = (event) => {
-          const { type, result, error } = event.data;
-          
-          if (type === 'encode-result') {
-            worker.removeEventListener('message', messageHandler);
-            resolve(result);
-          } else if (type === 'error') {
-            worker.removeEventListener('message', messageHandler);
-            reject(new Error(error));
-          }
-        };
-        
-        worker.addEventListener('message', messageHandler);
-        
-        // Send data to worker
-        worker.postMessage({
-          type: 'encode',
-          imageData: coverImage.src,
-          data: data
-        });
-      } else {
-        // Fallback to main thread processing if worker is not available
-        fallbackLsbEncode(coverImage, data).then(resolve).catch(reject);
+      imageWorker.addEventListener('message', messageHandler);
+      imageWorker.postMessage({ type: 'encode', imageData: imageDataURL, data });
+    });
+  } else {
+    // Fallback to main thread processing
+    loggingService.warn('Web Worker not available, falling back to main thread for encoding');
+    
+    try {
+      // Create a canvas and draw the cover image on it
+      const canvas = createCanvas(img.width, img.height);
+      const ctx = drawImageOnCanvas(img, canvas);
+      
+      // Get the cover image data
+      const coverImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const coverData = coverImageData.data;
+      
+      // Calculate the maximum number of bytes that can be embedded
+      const maxBytes = Math.floor((canvas.width * canvas.height * 3) / 8) - 4;
+      
+      // Check if the data will fit in the image
+      if (data.length > maxBytes) {
+        const errorMsg = `Message too large! Maximum size is ${maxBytes} bytes, but your message is ${data.length} bytes.`;
+        loggingService.error(errorMsg, { maxBytes, dataSize: data.length });
+        throw new Error(errorMsg);
       }
+      
+      loggingService.info('Preparing data for encoding', { maxBytes, dataSize: data.length });
+      
+      // Create a new array that includes the message length (32-bit integer) followed by the message
+      const messageLength = data.length;
+      const fullMessage = new Uint8Array(4 + messageLength);
+      
+      // Store message length as the first 4 bytes (32-bit integer)
+      fullMessage[0] = (messageLength >> 24) & 0xFF; // Most significant byte
+      fullMessage[1] = (messageLength >> 16) & 0xFF;
+      fullMessage[2] = (messageLength >> 8) & 0xFF;
+      fullMessage[3] = messageLength & 0xFF; // Least significant byte
+      
+      // Copy the message bytes after the length
+      fullMessage.set(data, 4);
+      
+      // Convert the bytes to bits for LSB encoding
+      const messageBits = [];
+      for (let i = 0; i < fullMessage.length; i++) {
+        for (let bit = 7; bit >= 0; bit--) {
+          // Extract each bit from the byte
+          messageBits.push((fullMessage[i] >> bit) & 1);
+        }
+      }
+      
+      loggingService.info('Embedding data into image', { bitsCount: messageBits.length });
+      
+      // Embed the message bits into the LSBs of the cover image
+      let bitIndex = 0;
+      
+      // Create a copy of the cover image data for the result
+      const resultData = new Uint8ClampedArray(coverData);
+      
+      // Embed the message bits into the LSBs of the RGB channels
+      for (let i = 0; i < resultData.length - 4 && bitIndex < messageBits.length; i += 4) {
+        // Modify the least significant bit of each RGB channel
+        if (bitIndex < messageBits.length) {
+          // Red channel
+          resultData[i] = (resultData[i] & 0xFE) | messageBits[bitIndex++];
+        }
+        
+        if (bitIndex < messageBits.length) {
+          // Green channel
+          resultData[i + 1] = (resultData[i + 1] & 0xFE) | messageBits[bitIndex++];
+        }
+        
+        if (bitIndex < messageBits.length) {
+          // Blue channel
+          resultData[i + 2] = (resultData[i + 2] & 0xFE) | messageBits[bitIndex++];
+        }
+        
+        // Alpha channel remains unchanged
+      }
+      
+      // Create a new ImageData object with the modified pixel data
+      const resultImageData = new ImageData(resultData, canvas.width, canvas.height);
+      
+      // Put the modified image data onto the canvas
+      ctx.putImageData(resultImageData, 0, 0);
+      
+      // Convert the canvas to a data URL
+      const encodedImageUrl = canvas.toDataURL('image/png');
+      
+      loggingService.info('LSB encoding completed successfully');
+      return encodedImageUrl;
     } catch (error) {
-      // Fallback to main thread processing if worker throws an error
-      console.warn('Web Worker error, falling back to main thread:', error);
-      fallbackLsbEncode(coverImage, data).then(resolve).catch(reject);
-    }
-  });
-};
-
-/**
- * Fallback function for LSB encoding on the main thread
- * @param {HTMLImageElement} coverImage - The cover image
- * @param {Uint8Array} data - The data to embed
- * @returns {Promise<string>} - A promise that resolves to a data URL
- */
-const fallbackLsbEncode = (coverImage, data) => {
-  // Create a canvas and draw the cover image on it
-  const canvas = createCanvas(coverImage.width, coverImage.height);
-  const ctx = drawImageOnCanvas(coverImage, canvas);
-  
-  // Get the cover image data
-  const coverImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  const coverData = coverImageData.data;
-  
-  // Calculate the maximum number of bytes that can be embedded
-  const maxBytes = Math.floor((canvas.width * canvas.height * 3) / 8) - 4;
-  
-  // Check if the data will fit in the image
-  if (data.length > maxBytes) {
-    throw new Error(`Message too large! Maximum size is ${maxBytes} bytes, but your message is ${data.length} bytes.`);
-  }
-  
-  // Create a new array that includes the message length (32-bit integer) followed by the message
-  const messageLength = data.length;
-  const fullMessage = new Uint8Array(4 + messageLength);
-  
-  // Store message length as the first 4 bytes (32-bit integer)
-  fullMessage[0] = (messageLength >> 24) & 0xFF; // Most significant byte
-  fullMessage[1] = (messageLength >> 16) & 0xFF;
-  fullMessage[2] = (messageLength >> 8) & 0xFF;
-  fullMessage[3] = messageLength & 0xFF; // Least significant byte
-  
-  // Copy the message bytes after the length
-  fullMessage.set(data, 4);
-  
-  // Convert the bytes to bits for LSB encoding
-  const messageBits = [];
-  for (let i = 0; i < fullMessage.length; i++) {
-    for (let bit = 7; bit >= 0; bit--) {
-      // Extract each bit from the byte
-      messageBits.push((fullMessage[i] >> bit) & 1);
+      loggingService.error('LSB encoding failed', { error: error.message });
+      throw error;
     }
   }
-  
-  // Embed the message bits into the LSBs of the cover image
-  let bitIndex = 0;
-  
-  // Create a copy of the cover image data for the result
-  const resultData = new Uint8ClampedArray(coverData);
-  
-  // Embed the message bits into the LSBs of the RGB channels
-  for (let i = 0; i < resultData.length - 4 && bitIndex < messageBits.length; i += 4) {
-    // Modify the least significant bit of each RGB channel
-    if (bitIndex < messageBits.length) {
-      // Red channel
-      resultData[i] = (resultData[i] & 0xFE) | messageBits[bitIndex++];
-    }
-    
-    if (bitIndex < messageBits.length) {
-      // Green channel
-      resultData[i + 1] = (resultData[i + 1] & 0xFE) | messageBits[bitIndex++];
-    }
-    
-    if (bitIndex < messageBits.length) {
-      // Blue channel
-      resultData[i + 2] = (resultData[i + 2] & 0xFE) | messageBits[bitIndex++];
-    }
-    
-    // Alpha channel remains unchanged
-  }
-  
-  // Create a new ImageData object with the modified pixel data
-  const resultImageData = new ImageData(resultData, canvas.width, canvas.height);
-  
-  // Put the modified image data onto the canvas
-  ctx.putImageData(resultImageData, 0, 0);
-  
-  // Return the data URL
-  return canvas.toDataURL('image/png');
 };
 
 /**
@@ -191,60 +223,63 @@ const fallbackLsbEncode = (coverImage, data) => {
  * @param {HTMLImageElement} stegoImage - The steganographic image
  * @returns {Promise<Uint8Array>} - A promise that resolves to the extracted data
  */
-const lsbDecode = (stegoImage) => {
-  return new Promise((resolve, reject) => {
-    try {
-      // Try to use the Web Worker first
-      const worker = initWorker();
+const lsbDecode = async (stegoImage) => {
+  loggingService.info('Starting LSB decoding');
+  
+  // If image is passed directly, use it, otherwise convert from data URL
+  let img = stegoImage;
+  let imageDataURL;
+  
+  if (typeof stegoImage === 'string') {
+    img = await dataURLToImage(stegoImage);
+    imageDataURL = stegoImage;
+  } else {
+    // Create a data URL from the image if it's an HTMLImageElement
+    const tempCanvas = createCanvas(img.width, img.height);
+    // We need to draw the image but don't need to use the context return value
+    // eslint-disable-next-line no-unused-vars
+    const tempCtx = drawImageOnCanvas(img, tempCanvas);
+    imageDataURL = tempCanvas.toDataURL('image/png');
+  }
+  
+  loggingService.info('Stego image prepared', { width: img.width, height: img.height });
+  
+  // Use Web Worker if available
+  if (imageWorker) {
+    loggingService.info('Using Web Worker for decoding');
+    return new Promise((resolve, reject) => {
+      const messageHandler = (event) => {
+        const { type, result, error } = event.data;
+        
+        if (type === 'decode-result') {
+          imageWorker.removeEventListener('message', messageHandler);
+          loggingService.info('Decoding completed in worker', { dataSize: result.length });
+          resolve(result);
+        } else if (type === 'error') {
+          imageWorker.removeEventListener('message', messageHandler);
+          loggingService.error('Worker decoding error', { error });
+          reject(new Error(error));
+        }
+        // Ignore log messages as they're handled by the main handler
+      };
       
-      if (worker) {
-        // Set up message handler
-        const messageHandler = (event) => {
-          const { type, result, error } = event.data;
-          
-          if (type === 'decode-result') {
-            worker.removeEventListener('message', messageHandler);
-            resolve(result);
-          } else if (type === 'error') {
-            worker.removeEventListener('message', messageHandler);
-            reject(new Error(error));
-          }
-        };
-        
-        worker.addEventListener('message', messageHandler);
-        
-        // Send data to worker
-        worker.postMessage({
-          type: 'decode',
-          imageData: stegoImage.src
-        });
-      } else {
-        // Fallback to main thread processing if worker is not available
-        fallbackLsbDecode(stegoImage).then(resolve).catch(reject);
-      }
-    } catch (error) {
-      // Fallback to main thread processing if worker throws an error
-      console.warn('Web Worker error, falling back to main thread:', error);
-      fallbackLsbDecode(stegoImage).then(resolve).catch(reject);
-    }
-  });
-};
-
-/**
- * Fallback function for LSB decoding on the main thread
- * @param {HTMLImageElement} stegoImage - The steganographic image
- * @returns {Promise<Uint8Array>} - A promise that resolves to the extracted data
- */
-const fallbackLsbDecode = (stegoImage) => {
-  return new Promise((resolve, reject) => {
+      imageWorker.addEventListener('message', messageHandler);
+      imageWorker.postMessage({ type: 'decode', imageData: imageDataURL });
+    });
+  } else {
+    // Fallback to main thread processing
+    loggingService.warn('Web Worker not available, falling back to main thread for decoding');
+    
     try {
       // Create a canvas and draw the stego image on it
-      const canvas = createCanvas(stegoImage.width, stegoImage.height);
-      const ctx = drawImageOnCanvas(stegoImage, canvas);
+      const canvas = createCanvas(img.width, img.height);
+      const ctx = drawImageOnCanvas(img, canvas);
       
       // Get the image data
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const data = imageData.data;
+      const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const data = imgData.data;
+      
+      loggingService.info('Extracting hidden bits from image');
       
       // Extract the LSB from each RGB channel to get the hidden bits
       const extractedBits = [];
@@ -258,6 +293,8 @@ const fallbackLsbDecode = (stegoImage) => {
         // Ignore Alpha channel
       }
       
+      loggingService.info('Extracting message length', { bitsExtracted: extractedBits.length });
+      
       // First, extract the message length (first 32 bits = 4 bytes)
       let messageLength = 0;
       for (let i = 0; i < 32; i++) {
@@ -265,10 +302,14 @@ const fallbackLsbDecode = (stegoImage) => {
       }
       
       // Check if the message length is valid
-      const maxPossibleLength = Math.floor((stegoImage.width * stegoImage.height * 3) / 8) - 4;
+      const maxPossibleLength = Math.floor((img.width * img.height * 3) / 8) - 4;
       if (messageLength <= 0 || messageLength > maxPossibleLength) {
-        throw new Error('No valid hidden message found in this image');
+        const errorMsg = 'No valid hidden message found in this image';
+        loggingService.error(errorMsg, { detectedLength: messageLength, maxPossibleLength });
+        throw new Error(errorMsg);
       }
+      
+      loggingService.info('Extracting message content', { messageLength });
       
       // Convert bits to bytes (starting after the length bits)
       const extractedBytes = new Uint8Array(messageLength);
@@ -283,11 +324,13 @@ const fallbackLsbDecode = (stegoImage) => {
         extractedBytes[i] = byte;
       }
       
-      resolve(extractedBytes);
+      loggingService.info('LSB decoding completed successfully', { bytesExtracted: extractedBytes.length });
+      return extractedBytes;
     } catch (error) {
-      reject(error);
+      loggingService.error('LSB decoding failed', { error: error.message });
+      throw error;
     }
-  });
+  }
 };
 
 const imageService = {
