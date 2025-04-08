@@ -5,8 +5,8 @@
 // Betterstack configuration from environment variables
 const BETTERSTACK_CONFIG = {
   sourceId: process.env.REACT_APP_BETTERSTACK_SOURCE_ID || 'spawnsmart',
-  sourceToken: process.env.REACT_APP_BETTERSTACK_SOURCE_TOKEN || 'fMmpKP5DibaBBTGUpc1EdvPD',
-  host: process.env.REACT_APP_BETTERSTACK_HOST || 's1254691.eu-nbg-2.betterstackdata.com',
+  sourceToken: process.env.REACT_APP_BETTERSTACK_SOURCE_TOKEN || '4LkyLpefUiqkjeda8B7E2mKx',
+  host: process.env.REACT_APP_BETTERSTACK_HOST || 's1266395.eu-nbg-2.betterstackdata.com',
 };
 
 // Log levels
@@ -58,44 +58,65 @@ const sendLog = async (level, message, metadata = {}) => {
       metadata: enhancedMetadata,
     };
     
-    try {
-      // Use Netlify function proxy to avoid CORS issues
-      const proxyUrl = '/.netlify/functions/log-proxy';
-      const response = await fetch(proxyUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(logPayload),
-      });
-      
-      if (!response.ok) {
-        throw new Error(`Proxy responded with status: ${response.status}`);
-      }
-      
-      return response;
-    } catch (fetchError) {
-      // If proxy fails, try direct sending with no-cors mode as fallback
-      console.warn('Failed to send log through proxy, trying direct with no-cors:', fetchError);
-      
+    // Only use the Netlify proxy in production environment
+    if (process.env.NODE_ENV === 'production') {
       try {
-        const directResponse = await fetch(`https://${BETTERSTACK_CONFIG.host}/v1/logs`, {
+        // Use Netlify function proxy to avoid CORS issues in production
+        const proxyUrl = '/.netlify/functions/log-proxy';
+        console.debug('Attempting to send log through proxy:', proxyUrl);
+        const response = await fetch(proxyUrl, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${BETTERSTACK_CONFIG.sourceToken}`,
           },
           body: JSON.stringify(logPayload),
-          mode: 'no-cors',
         });
         
-        return directResponse;
-      } catch (directError) {
-        // If both methods fail, add to queue
-        console.warn('Failed to send log directly, adding to queue:', directError);
-        addToLogQueue(logPayload);
-        return null;
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.warn(`Proxy responded with status: ${response.status}`, errorText);
+          throw new Error(`Proxy responded with status: ${response.status}`);
+        }
+        
+        console.debug('Successfully sent log through proxy');
+        return response;
+      } catch (fetchError) {
+        console.warn('Failed to send log through proxy, falling back to direct send:', fetchError);
+        // Fall through to direct sending if proxy fails
       }
+    }
+    
+    // Direct sending - used in development or as fallback in production
+    try {
+      // Using the root endpoint as specified in the documentation
+      const betterStackUrl = `https://${BETTERSTACK_CONFIG.host}/`;
+      console.debug('Sending direct log to:', betterStackUrl);
+      
+      const directResponse = await fetch(betterStackUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${BETTERSTACK_CONFIG.sourceToken}`,
+        },
+        body: JSON.stringify(logPayload),
+        mode: 'cors',
+        credentials: 'omit',
+      });
+      
+      // Check specifically for 202 status as mentioned in the documentation
+      if (directResponse.status !== 202) {
+        const errorText = await directResponse.text();
+        console.warn(`Direct log failed with status: ${directResponse.status}`, errorText);
+        throw new Error(`Direct log failed: Expected 202 status, got ${directResponse.status}`);
+      }
+      
+      console.debug('Successfully sent log directly with 202 status');
+      return directResponse;
+    } catch (directError) {
+      // If direct sending fails, add to queue
+      console.warn('Failed to send log directly, adding to queue:', directError);
+      addToLogQueue(logPayload);
+      return null;
     }
   } catch (error) {
     // Don't let logging errors affect the application

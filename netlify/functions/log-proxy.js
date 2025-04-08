@@ -16,7 +16,7 @@ exports.handler = async (event, context) => {
     
     // Get Betterstack configuration from environment variables
     const sourceId = process.env.BETTERSTACK_SOURCE_ID || payload.source_id;
-    const sourceToken = process.env.BETTERSTACK_SOURCE_TOKEN;
+    const sourceToken = process.env.BETTERSTACK_SOURCE_TOKEN || '4LkyLpefUiqkjeda8B7E2mKx';
     const host = process.env.BETTERSTACK_HOST || 's1266395.eu-nbg-2.betterstackdata.com';
     
     // Ensure we have the required credentials
@@ -43,8 +43,8 @@ exports.handler = async (event, context) => {
       region: context.functionName,
     };
     
-    // Send log to Betterstack
-    const response = await fetch(`https://${host}/v1/logs`, {
+    // Send log to Betterstack - using root endpoint as specified in documentation
+    const response = await fetch(`https://${host}/`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -53,8 +53,8 @@ exports.handler = async (event, context) => {
       body: JSON.stringify(logPayload),
     });
     
-    // Check if the request was successful
-    if (!response.ok) {
+    // Check if the request was successful - expect 202 status
+    if (response.status !== 202) {
       const errorText = await response.text();
       console.error('Error from Betterstack:', errorText);
       return {
