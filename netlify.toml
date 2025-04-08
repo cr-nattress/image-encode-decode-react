@@ -6,6 +6,9 @@
   NODE_VERSION = "16"
   NPM_FLAGS = "--legacy-peer-deps"
   CI = "false"
+  # Betterstack configuration
+  BETTERSTACK_SOURCE_ID = "image_encode_decode"
+  BETTERSTACK_HOST = "s1266395.eu-nbg-2.betterstackdata.com"
 
 # Handle SPA routing for React Router
 [[redirects]]
