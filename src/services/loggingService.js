@@ -4,9 +4,9 @@
 
 // Betterstack configuration from environment variables
 const BETTERSTACK_CONFIG = {
-  sourceId: process.env.REACT_APP_BETTERSTACK_SOURCE_ID || 'image_encode_decode',
-  sourceToken: process.env.REACT_APP_BETTERSTACK_SOURCE_TOKEN || '4LkyLpefUiqkjeda8B7E2mKx',
-  host: process.env.REACT_APP_BETTERSTACK_HOST || 's1266395.eu-nbg-2.betterstackdata.com',
+  sourceId: process.env.REACT_APP_BETTERSTACK_SOURCE_ID || 'spawnsmart',
+  sourceToken: process.env.REACT_APP_BETTERSTACK_SOURCE_TOKEN || 'fMmpKP5DibaBBTGUpc1EdvPD',
+  host: process.env.REACT_APP_BETTERSTACK_HOST || 's1254691.eu-nbg-2.betterstackdata.com',
 };
 
 // Log levels
@@ -198,10 +198,10 @@ const logUserAction = (action, details = {}) => {
  * @param {string} context - The context where the error occurred
  * @param {Object} [additionalInfo] - Additional information about the error
  */
-const logError = (error, context, additionalInfo = {}) => {
-  return error(error.message, {
+const logError = (errorObj, context, additionalInfo = {}) => {
+  return sendLog(LOG_LEVELS.ERROR, errorObj.message, {
     context,
-    stack: error.stack,
+    stack: errorObj.stack,
     ...additionalInfo,
   });
 };
