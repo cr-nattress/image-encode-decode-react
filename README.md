@@ -8,6 +8,7 @@ A React application for encoding and decoding images, enhanced with shadcn/ui co
 - Modern UI with shadcn/ui components
 - Tailwind CSS integration
 - CRACO configuration for CRA customization
+- Betterstack logging integration for monitoring user interactions and application events
 
 ## shadcn/ui Integration
 
@@ -20,6 +21,35 @@ Key integration points:
 - Coexistence with SCSS styling system
 
 For detailed implementation steps, see the [shadcn-implementation-guide.md](./research/shadcn-implementation-guide.md) in the research folder.
+
+## Betterstack Logging Integration
+
+This application includes integration with Betterstack for logging user interactions and application events. The logging system provides valuable insights into how users interact with the application and helps identify potential issues.
+
+### Environment Variables
+
+The Betterstack integration uses environment variables to configure the connection. Create a `.env` file in the root directory with the following variables:
+
+```
+# Betterstack logging configuration
+REACT_APP_BETTERSTACK_SOURCE_ID=your_source_id
+REACT_APP_BETTERSTACK_SOURCE_TOKEN=your_source_token
+REACT_APP_BETTERSTACK_HOST=your_betterstack_host.betterstackdata.com
+
+# Enable logging in development mode (true/false)
+REACT_APP_ENABLE_LOGGING=false
+```
+
+A `.env.example` file is provided as a template. Copy this file to `.env` and replace the values with your own Betterstack credentials.
+
+### Logged Events
+
+The application logs the following types of events:
+
+- Application initialization and closure
+- User interactions (mode changes, file uploads, etc.)
+- Image processing operations
+- Errors and warnings
 
 ## Getting Started
 
@@ -39,6 +69,11 @@ cd image-encode-decode-react-shadcn
 
 # Install dependencies
 npm install
+
+# Copy environment variables template
+cp .env.example .env
+
+# Edit .env file with your Betterstack credentials
 
 # Start the development server
 npm start
@@ -78,3 +113,5 @@ You can learn more in the [Create React App documentation](https://facebook.gith
 To learn React, check out the [React documentation](https://reactjs.org/).
 
 For more information about shadcn/ui, visit [shadcn/ui documentation](https://ui.shadcn.com/).
+
+For more information about Betterstack logging, visit [Betterstack documentation](https://betterstack.com/docs).

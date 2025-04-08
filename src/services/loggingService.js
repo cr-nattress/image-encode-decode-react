@@ -2,11 +2,11 @@
  * Logging service for integration with Betterstack
  */
 
-// Betterstack configuration
+// Betterstack configuration from environment variables
 const BETTERSTACK_CONFIG = {
-  sourceId: 'image_encode_decode',
-  sourceToken: '4LkyLpefUiqkjeda8B7E2mKx',
-  host: 's1266395.eu-nbg-2.betterstackdata.com',
+  sourceId: process.env.REACT_APP_BETTERSTACK_SOURCE_ID || 'image_encode_decode',
+  sourceToken: process.env.REACT_APP_BETTERSTACK_SOURCE_TOKEN || '4LkyLpefUiqkjeda8B7E2mKx',
+  host: process.env.REACT_APP_BETTERSTACK_HOST || 's1266395.eu-nbg-2.betterstackdata.com',
 };
 
 // Log levels
@@ -26,7 +26,7 @@ const LOG_LEVELS = {
  */
 const sendLog = async (level, message, metadata = {}) => {
   try {
-    // Only log in production environment
+    // Only log in production environment or if explicitly enabled in development
     if (process.env.NODE_ENV !== 'production' && process.env.REACT_APP_ENABLE_LOGGING !== 'true') {
       // In development, just log to console
       console[level](`[${level.toUpperCase()}] ${message}`, metadata);
